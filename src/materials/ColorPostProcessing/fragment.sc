@@ -200,24 +200,6 @@ vec3 TonemapHable(vec3 rgb, float W) {
     return curr * whiteScale;
 }
 
-vec3 ApplyACESGamutCompression(vec3 color) {
-    float maxColor = max(color.x, max(color.y, color.z));
-    if (maxColor <= 0.0) {
-        return color;
-    }
-    vec3 dist = (vec3_splat(maxColor) - color) / maxColor;
-    vec3 thresh = vec3_splat(0.8);
-    vec3 factor = vec3(
-        dist.x > thresh.x ? 1.0 : 0.0,
-        dist.y > thresh.y ? 1.0 : 0.0,
-        dist.z > thresh.z ? 1.0 : 0.0
-    );
-    vec3 over = dist - thresh;
-    vec3 compressedDist = thresh + (vec3_splat(0.2) * over) / (vec3_splat(0.2) + over);
-    vec3 newColor = vec3_splat(maxColor) - (compressedDist * maxColor);
-    return mix(color, newColor, factor);
-}
-
 vec3 RRTAndODTFit(vec3 v) {
     vec3 a = v * (v + vec3_splat(0.0245786)) - vec3_splat(0.000090537);
     vec3 b = v * (0.983729 * v + vec3_splat(0.4329510)) + vec3_splat(0.238081);
@@ -242,7 +224,6 @@ vec3 ACESFitted(vec3 rgb) {
 }
 
 vec3 TonemapACES(vec3 rgb) {
-    rgb = ApplyACESGamutCompression(rgb);
     return ACESFitted(rgb);
 }
 
