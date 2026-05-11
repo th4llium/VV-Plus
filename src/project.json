@@ -1,0 +1,28 @@
+{
+  "base_profile": {
+    "merge_source": ["vanilla"],
+    "include_patterns": [
+      "materials/ColorPostProcessing"
+    ],
+    "exclude_patterns": ["include/*", "vanilla/*"],
+    "include_search_paths": [
+      "include",
+      "include/bgfx"
+    ]
+  },
+  "profiles": {
+    "windows": {
+      "platforms": ["Direct3D_SM65"]
+    },
+    "android": {
+      "platforms": ["ESSL_310"]
+    },
+    "ios": {
+      "platforms": ["Metal"]
+    },
+    "multiple": {
+      "platforms": ["Direct3D_SM65", "ESSL_310", "Metal"]
+    }
+  }
+}
+
