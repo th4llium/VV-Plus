@@ -42,6 +42,14 @@ uniform vec4 ElapsedFrameTime;
     - The creator of the code, Thallium.
 */
 
+struct FragmentInput {
+    vec4 texcoord0;
+};
+
+struct FragmentOutput {
+    vec4 Color0;
+};
+
 float luminance(vec3 clr) {
     return dot(clr, vec3(0.2126, 0.7152, 0.0722));
 }
@@ -251,56 +259,43 @@ vec3 TonemapGeneric(vec3 rgb) {
 }
 */
 
-vec3 agxDefaultContrastApprox(vec3 x) {
-    vec3 x2 = x * x;
-    vec3 x4 = x2 * x2;
-    vec3 x6 = x4 * x2;
-    return -17.86 * x6 * x + 78.01 * x6 - 126.7 * x4 * x + 92.06 * x4 - 28.72 * x2 * x + 4.361 * x2 - 0.1718 * x + vec3_splat(0.002857);
-}
-
-vec3 agx(vec3 val) {
-    mat3 agx_mat = mtxFromCols(
-        vec3(0.842479062253094, 0.0423282422610123, 0.0423756549057051),
-        vec3(0.0784335999999992, 0.878468636469772, 0.0784336),
-        vec3(0.0792237451477643, 0.0791661274605434, 0.879142973793104)
+vec3 AgX_Log2(vec3 val) {
+    mat3 agx_mat = mtxFromRows(
+        vec3(0.842479062253094, 0.0784335999999992, 0.0792237451477643),
+        vec3(0.0423282422610123, 0.878468636469772, 0.0791661274605434),
+        vec3(0.0423756549057051, 0.0784336, 0.879142973793104)
     );
-    float min_ev = -12.47393;
-    float max_ev = 4.026069;
-    
-    val = mul(agx_mat, val);
-    val = clamp(log2(max(val, vec3_splat(1e-10))), vec3_splat(min_ev), vec3_splat(max_ev));
-    val = (val - vec3_splat(min_ev)) / vec3_splat(max_ev - min_ev);
-    val = agxDefaultContrastApprox(val);
-    
-    return val;
+    vec3 clamped_val = max(val, vec3_splat(1e-10));
+    vec3 mapped_val = mul(agx_mat, clamped_val);
+    vec3 log_val = clamp(log2(mapped_val), vec3_splat(-12.47393), vec3_splat(4.026069));
+    return (log_val + vec3_splat(12.47393)) / vec3_splat(16.5);
 }
 
-vec3 agxEotf(vec3 val) {
-    mat3 agx_mat_inv = mtxFromCols(
-        vec3(1.19687900512017, -0.0528968517574562, -0.0529716355144438),
-        vec3(-0.0980208811401368, 1.15190312990417, -0.0980434501171241),
-        vec3(-0.0990297440797205, -0.0989611768448433, 1.15107367264116)
-    );
-    val = mul(agx_mat_inv, val);
-    return val;
+vec3 AgX_DefaultContrastApprox(vec3 x) {
+    return x * (vec3_splat(0.12410293) + x * (vec3_splat(0.2078625) + x * (vec3_splat(-5.9293431) + x * (vec3_splat(30.376821) + x * (vec3_splat(-38.901506) + x * vec3_splat(15.122061))))));
 }
 
-vec3 agxLook(vec3 val) {
-    vec3 offset = vec3_splat(0.0);
-    vec3 slope = vec3_splat(1.0);
-    vec3 power = vec3_splat(1.35);
-    float sat = 1.4;
-    
-    val = pow(max(val * slope + offset, vec3_splat(0.0)), power);
+vec3 AgX_ApplyPunchyLook(vec3 val) {
     float luma = dot(val, vec3(0.2126, 0.7152, 0.0722));
-    return vec3_splat(luma) + vec3_splat(sat) * (val - vec3_splat(luma));
+    vec3 valPow = pow(max(val, vec3_splat(0.0)), vec3_splat(1.35));
+    return vec3_splat(luma) + vec3_splat(1.4) * (valPow - vec3_splat(luma));
+}
+
+vec3 AgX_InverseTransform(vec3 val) {
+    mat3 agx_mat_inv = mtxFromRows(
+        vec3(1.19687900512017, -0.0980208811401368, -0.0990297440797205),
+        vec3(-0.0528968517574562, 1.15190312990417, -0.0989611768448433),
+        vec3(-0.0529716355144438, -0.0980434501171241, 1.15107367264116)
+    );
+    return mul(agx_mat_inv, val);
 }
 
 vec3 TonemapGeneric(vec3 rgb) {
-    vec3 outColor = agx(rgb);
-    outColor = agxLook(outColor);
-    outColor = agxEotf(outColor);
-    return clamp(outColor, vec3_splat(0.0), vec3_splat(1.0));
+    vec3 agx_val = AgX_Log2(rgb);
+    agx_val = AgX_DefaultContrastApprox(agx_val);
+    agx_val = AgX_ApplyPunchyLook(agx_val);
+    agx_val = AgX_InverseTransform(agx_val);
+    return clamp(agx_val, vec3_splat(0.0), vec3_splat(1.0));
 }
 
 vec3 ApplyTonemap(vec3 sceneColor, float averageLuminance, float compensation, float whitePoint, int tonemapper) {
@@ -340,10 +335,10 @@ vec3 color_gamma(vec3 clr, vec3 e) {
     }
 }
 
-void main() {
-    vec3 sceneColor = texture2D(s_ColorTexture, v_texcoord0.xy).xyz;
-    float unexposeValue = texture2D(s_PreExposureLuminance, vec2_splat(0.5)).x;
+void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
+    vec3 sceneColor = texture2D(s_ColorTexture, fragInput.texcoord0.xy).xyz;
     
+    float unexposeValue = texture2D(s_PreExposureLuminance, vec2_splat(0.5)).x;
     if (TonemapParams0.z > 0.0) {
         sceneColor = UnExposeLighting(sceneColor, unexposeValue);
     }
@@ -391,9 +386,20 @@ void main() {
     finalColor = clamp(finalColor, vec3_splat(0.0), vec3_splat(1.0));
     
     if (RasterizedColorEnabled.x > 0.0) {
-        vec4 rasterized = texture2D(s_RasterizedColor, v_texcoord0.xy);
-        finalColor = mix(finalColor, rasterized.xyz, rasterized.w);
+        vec4 rasterized = texture2D(s_RasterizedColor, fragInput.texcoord0.xy);
+        finalColor = (finalColor * (1.0 - rasterized.w)) + rasterized.xyz;
     }
     
-    gl_FragColor = vec4(finalColor, 1.0);
+    fragOutput.Color0 = vec4(finalColor, 1.0);
+}
+
+void main() {
+    FragmentInput fragmentInput;
+    FragmentOutput fragmentOutput;
+    
+    fragmentInput.texcoord0 = v_texcoord0;
+    
+    Frag(fragmentInput, fragmentOutput);
+    
+    gl_FragColor = fragmentOutput.Color0;
 }
