@@ -63,7 +63,8 @@ uniform vec4 FogColor;
     - The obsfucated shader source code by Veka. Source: https://github.com/veka0/mcbe-shader-codebase/tree/release/obfuscated/materials/ColorPostProcessing
     - "Fork AgX Minima troy_s 342" made by troy_s. Source: https://www.shadertoy.com/view/mdcSDH
     - Krzysztof Narkowicz 2016, "ACES Filmic Tone Mapping Curve". Source: https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
-    - The creator of the code, Thallium.
+    - The creator of the code, Mojang.
+    - Modified by, Thallium.
 
     TODO:
     - Replace all Reinhards with modern tonemapping operators that have better results (Khronos PBR Neutral, GT7, and maybe Lottes?).
