@@ -323,7 +323,12 @@ vec3 color_gamma(vec3 clr, vec3 e) {
 void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     vec2 uv = fragInput.texcoord0.xy;
     vec2 unscaledUv = fragInput.texcoord0.zw;
-    vec2 caOffset = (unscaledUv - vec2_splat(0.5)) * 0.005 * ViewportScale.xy;
+    
+    vec2 edgeDist = min(unscaledUv, vec2_splat(1.0) - unscaledUv);
+    vec2 edgeFade = smoothstep(vec2_splat(0.0), vec2_splat(0.025), edgeDist);
+    float caMask = min(edgeFade.x, edgeFade.y);
+    
+    vec2 caOffset = (unscaledUv - vec2_splat(0.5)) * 0.005 * ViewportScale.xy * caMask;
     
     vec2 uvR = clamp(uv - caOffset, vec2_splat(0.0), ViewportScale.xy);
     vec2 uvB = clamp(uv + caOffset, vec2_splat(0.0), ViewportScale.xy);
