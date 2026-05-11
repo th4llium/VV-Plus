@@ -39,7 +39,12 @@ uniform vec4 ElapsedFrameTime;
     CREDITS:
     - The obsfucated shader source code by Veka. Source: https://github.com/veka0/mcbe-shader-codebase/tree/release/obfuscated/materials/ColorPostProcessing
     - "Fork AgX Minima troy_s 342" made by troy_s. Source: https://www.shadertoy.com/view/mdcSDH
+    - Krzysztof Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
     - The creator of the code, Thallium.
+
+    TODO:
+    - Replace all Reinhards with modern tonemapping operators that have better results (Khronos PBR Neutral, GT7, and maybe Lottes?).
+    - Much better color grading, I definitely can improve them for better results.
 */
 
 struct FragmentInput {
@@ -200,35 +205,20 @@ vec3 TonemapHable(vec3 rgb, float W) {
     return curr * whiteScale;
 }
 
-vec3 RRTAndODTFit(vec3 v) {
-    vec3 a = v * (v + vec3_splat(0.0245786)) - vec3_splat(0.000090537);
-    vec3 b = v * (0.983729 * v + vec3_splat(0.4329510)) + vec3_splat(0.238081);
-    return a / b;
-}
-
-vec3 ACESFitted(vec3 rgb) {
-    mat3 ACESInputMat = mtxFromRows(
-        vec3(0.59719, 0.35458, 0.04823),
-        vec3(0.07600, 0.90834, 0.01566),
-        vec3(0.02840, 0.13383, 0.83777)
-    );
-    mat3 ACESOutputMat = mtxFromRows(
-        vec3(1.60475, -0.53108, -0.07367),
-        vec3(-0.10208, 1.10813, -0.00605),
-        vec3(-0.00327, -0.07276, 1.07602)
-    );
-    rgb = mul(ACESInputMat, rgb);
-    rgb = RRTAndODTFit(rgb);
-    rgb = mul(ACESOutputMat, rgb);
-    return clamp(rgb, vec3_splat(0.0), vec3_splat(1.0));
-}
-
 vec3 TonemapACES(vec3 rgb) {
-    return ACESFitted(rgb);
+    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+    // Why not use Stephen Hills approximations for ACES? Because this is more optimized, and the Stephen Hills approximations tends to lose saturation which is not the art direction the community wants.
+    float ExposureBias = 1.2;
+    vec3 x = rgb * ExposureBias;
+    
+    vec3 num = x * (2.51 * x + vec3_splat(0.03));
+    vec3 den = x * (2.43 * x + vec3_splat(0.59)) + vec3_splat(0.14);
+    
+    return clamp(num / den, vec3_splat(0.0), vec3_splat(1.0));
 }
 
 /*
-// A vanilla generic tonemapping made by Mojang for Vibrant Visuals, isn't used due to art direction.
+// A vanilla generic tonemapping made by Mojang for Vibrant Visuals, isn't used due to art direction. Replaced with AgX Punchy.
 vec3 TonemapGeneric(vec3 rgb) {
     float peak = max(rgb.x, max(rgb.y, rgb.z));
     vec3 ratio = rgb / vec3_splat(peak);
