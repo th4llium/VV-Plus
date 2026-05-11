@@ -1,12 +1,15 @@
 $input v_texcoord0
 #include <bgfx_shader.sh>
 
+// ColorPostProcessing buffers
 SAMPLER2D_HIGHP_AUTOREG(s_AverageLuminance);
 SAMPLER2D_HIGHP_AUTOREG(s_ColorTexture);
 SAMPLER2D_HIGHP_AUTOREG(s_CustomExposureCompensation);
 SAMPLER2D_HIGHP_AUTOREG(s_PreExposureLuminance);
 SAMPLER2D_HIGHP_AUTOREG(s_RasterizedColor);
+SAMPLER2D_HIGHP_AUTOREG(s_RasterColor);
 
+// ColorPostProcessing uniforms
 uniform vec4 ColorGrading_Contrast_Highlights;
 uniform vec4 ColorGrading_Contrast_Midtones;
 uniform vec4 ColorGrading_Contrast_Shadows;
@@ -32,6 +35,26 @@ uniform vec4 LuminanceMinMaxAndWhitePointAndMinWhitePoint;
 uniform vec4 RasterizedColorEnabled;
 uniform vec4 TonemapParams0;
 uniform vec4 ElapsedFrameTime;
+uniform vec4 ViewportScale;
+uniform vec4 ScreenSize;
+
+// Custom uniforms that are not used in vanilla, but can be used by shaderpacks for various purposes.
+uniform vec4 WeatherID;
+uniform vec4 BiomeID;
+uniform vec4 CloudHeight;
+uniform vec4 Day;
+uniform vec4 DimensionID;
+uniform vec4 LocalClientID;
+uniform vec4 MoonPhase;
+uniform vec4 RenderDistance;
+uniform vec4 TimeOfDay;
+uniform vec4 CameraFacingDirection;
+uniform vec4 CameraPosition;
+uniform vec4 LastCameraFacingDirection;
+uniform vec4 LastCameraPosition;
+uniform vec4 SunDirection;
+uniform vec4 CloudColor;
+uniform vec4 FogColor;
 
 /*
     A tonemapping shader for the Vibrant Visual (deferred) pipeline for Minecraft Bedrock Edition.
@@ -39,7 +62,7 @@ uniform vec4 ElapsedFrameTime;
     CREDITS:
     - The obsfucated shader source code by Veka. Source: https://github.com/veka0/mcbe-shader-codebase/tree/release/obfuscated/materials/ColorPostProcessing
     - "Fork AgX Minima troy_s 342" made by troy_s. Source: https://www.shadertoy.com/view/mdcSDH
-    - Krzysztof Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
+    - Krzysztof Narkowicz 2016, "ACES Filmic Tone Mapping Curve". Source: https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
     - The creator of the code, Thallium.
 
     TODO:
@@ -64,11 +87,11 @@ float luminanceToEV100(float lum) {
 }
 
 vec3 getGradingVector(vec4 highlights, vec4 shadows, vec4 midtones, float averageLuminance, float colorLuminance, vec3 defaultVal) {
-    bool hasHighlight = highlights.w != 0.0;
-    bool hasShadow = shadows.w != 0.0;
+    float highlightTest = highlights.w;
+    float shadowTest = shadows.w;
     
-    bool isHighlight = hasHighlight ? (colorLuminance >= (averageLuminance * ColorGrading_Misc.y)) : false;
-    bool isShadow = hasShadow ? (colorLuminance <= (averageLuminance * ColorGrading_Misc.z)) : false;
+    bool isHighlight = (highlightTest != 0.0) ? (colorLuminance >= (averageLuminance * ColorGrading_Misc.y)) : false;
+    bool isShadow = (shadowTest != 0.0) ? (colorLuminance <= (averageLuminance * ColorGrading_Misc.z)) : false;
     
     if (isHighlight) {
         return highlights.xyz;
@@ -76,9 +99,9 @@ vec3 getGradingVector(vec4 highlights, vec4 shadows, vec4 midtones, float averag
         return shadows.xyz;
     } else {
         if (midtones.w != 0.0) {
-            if ((colorLuminance < averageLuminance) && hasShadow) {
+            if ((colorLuminance < averageLuminance) && (shadowTest != 0.0)) {
                 return mix(shadows.xyz, midtones.xyz, vec3_splat((colorLuminance - (averageLuminance * ColorGrading_Misc.z)) / (averageLuminance - (averageLuminance * ColorGrading_Misc.z))));
-            } else if ((colorLuminance > averageLuminance) && hasHighlight) {
+            } else if ((colorLuminance > averageLuminance) && (highlightTest != 0.0)) {
                 return mix(midtones.xyz, highlights.xyz, vec3_splat((colorLuminance - averageLuminance) / ((averageLuminance * ColorGrading_Misc.y) - averageLuminance)));
             } else {
                 return midtones.xyz;
@@ -167,13 +190,6 @@ vec3 ApplyColorGrading(vec3 inColor, float averageLuminance) {
     return outColor;
 }
 
-const int kTonemapperReinhard = 0;
-const int kTonemapperReinhardLuma = 1;
-const int kTonemapperReinhardLuminance = 2;
-const int kTonemapperHable = 3;
-const int kTonemapperACES = 4;
-const int kTonemapperGeneric = 5;
-
 vec3 TonemapReinhard(vec3 rgb) {
     return rgb / (vec3_splat(1.0) + rgb);
 }
@@ -199,15 +215,13 @@ vec3 HableTonemap(vec3 x) {
 }
 
 vec3 TonemapHable(vec3 rgb, float W) {
-    const float ExposureBias = 2.0;
+    float ExposureBias = 2.0;
     vec3 curr = HableTonemap(rgb * ExposureBias);
     vec3 whiteScale = vec3_splat(1.0) / HableTonemap(vec3_splat(W));
     return curr * whiteScale;
 }
 
 vec3 TonemapACES(vec3 rgb) {
-    // Narkowicz 2015, "ACES Filmic Tone Mapping Curve"
-    // Why not use Stephen Hills approximations for ACES? Because this is more optimized, and the Stephen Hills approximations tends to lose saturation which is not the art direction the community wants.
     float ExposureBias = 1.2;
     vec3 x = rgb * ExposureBias;
     
@@ -269,7 +283,7 @@ vec3 TonemapGeneric(vec3 rgb) {
     return clamp(agx_val, vec3_splat(0.0), vec3_splat(1.0));
 }
 
-vec3 ApplyTonemap(vec3 sceneColor, float averageLuminance, float compensation, float whitePoint, int tonemapper) {
+vec3 ApplyTonemap(vec3 sceneColor, float averageLuminance, float compensation, float whitePoint, float tonemapperType) {
     float toneMappedAverageLuminance = 0.18;
     float exposure = (toneMappedAverageLuminance / averageLuminance) * compensation;
     vec3 exposedColor = sceneColor * exposure;
@@ -277,15 +291,15 @@ vec3 ApplyTonemap(vec3 sceneColor, float averageLuminance, float compensation, f
     float scaledWhitePoint = exposure * whitePoint;
     float whitePointSquared = scaledWhitePoint * scaledWhitePoint;
 
-    if (tonemapper == kTonemapperReinhardLuma) {
+    if (tonemapperType >= 1.0 && tonemapperType < 2.0) {
         return TonemapReinhardLuma(exposedColor, whitePointSquared);
-    } else if (tonemapper == kTonemapperReinhardLuminance) {
+    } else if (tonemapperType >= 2.0 && tonemapperType < 3.0) {
         return TonemapReinhardLuminance(exposedColor, whitePointSquared);
-    } else if (tonemapper == kTonemapperHable) {
+    } else if (tonemapperType >= 3.0 && tonemapperType < 4.0) {
         return TonemapHable(exposedColor, whitePointSquared);
-    } else if (tonemapper == kTonemapperACES) {
+    } else if (tonemapperType >= 4.0 && tonemapperType < 5.0) {
         return TonemapACES(exposedColor);
-    } else if (tonemapper == kTonemapperGeneric) {
+    } else if (tonemapperType >= 5.0 && tonemapperType < 6.0) {
         return TonemapGeneric(exposedColor);
     } else {
         return TonemapReinhard(exposedColor);
@@ -307,7 +321,17 @@ vec3 color_gamma(vec3 clr, vec3 e) {
 }
 
 void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
-    vec3 sceneColor = texture2D(s_ColorTexture, fragInput.texcoord0.xy).xyz;
+    vec2 uv = fragInput.texcoord0.xy;
+    vec2 unscaledUv = fragInput.texcoord0.zw;
+    vec2 caOffset = (unscaledUv - vec2_splat(0.5)) * 0.005 * ViewportScale.xy;
+    
+    vec2 uvR = clamp(uv - caOffset, vec2_splat(0.0), ViewportScale.xy);
+    vec2 uvB = clamp(uv + caOffset, vec2_splat(0.0), ViewportScale.xy);
+    
+    float r = texture2D(s_ColorTexture, uvR).x;
+    float g = texture2D(s_ColorTexture, uv).y;
+    float b = texture2D(s_ColorTexture, uvB).z;
+    vec3 sceneColor = vec3(r, g, b);
     
     float unexposeValue = texture2D(s_PreExposureLuminance, vec2_splat(0.5)).x;
     if (TonemapParams0.z > 0.0) {
@@ -331,10 +355,10 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     }
 
     float compensation = ExposureCompensation.y;
-    int exposureCurveType = int(ExposureCompensation.x);
-    if ((exposureCurveType > 0) && (exposureCurveType < 2)) {
+    float exposureCurveType = ExposureCompensation.x;
+    if ((exposureCurveType > 0.0) && (exposureCurveType < 2.0)) {
         compensation = 1.03 - (2.0 / ((0.43429449 * log(averageLuminance + 1.0)) + 2.0));
-    } else if (exposureCurveType > 1) {
+    } else if (exposureCurveType > 1.0) {
         float t = (LuminanceMinMaxAndWhitePointAndMinWhitePoint.x == LuminanceMinMaxAndWhitePointAndMinWhitePoint.y) ? 0.5 : ((luminanceToEV100(averageLuminance) - luminanceToEV100(LuminanceMinMaxAndWhitePointAndMinWhitePoint.x)) / (luminanceToEV100(LuminanceMinMaxAndWhitePointAndMinWhitePoint.y) - luminanceToEV100(LuminanceMinMaxAndWhitePointAndMinWhitePoint.x)));
         compensation = texture2D(s_CustomExposureCompensation, vec2(t, 0.5)).x;
     }
@@ -345,7 +369,7 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     vec3 finalColor;
     if (TonemapParams0.y >= 0.5) {
         float whitePoint = max(LuminanceMinMaxAndWhitePointAndMinWhitePoint.z, LuminanceMinMaxAndWhitePointAndMinWhitePoint.w);
-        finalColor = ApplyTonemap(sceneColor, averageLuminance, compensation, whitePoint, int(TonemapParams0.x));
+        finalColor = ApplyTonemap(sceneColor, averageLuminance, compensation, whitePoint, TonemapParams0.x);
     } else {
         finalColor = sceneColor;
     }
@@ -355,6 +379,9 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     
     finalColor = color_gamma(finalColor, e);
     finalColor = clamp(finalColor, vec3_splat(0.0), vec3_splat(1.0));
+    
+    float noise = fract(sin(dot(fragInput.texcoord0.xy + vec2_splat(ElapsedFrameTime.x), vec2(12.9898, 78.233))) * 43758.5453);
+    finalColor = clamp(finalColor + vec3_splat((noise - 0.5) * 0.03), vec3_splat(0.0), vec3_splat(1.0));
     
     if (RasterizedColorEnabled.x > 0.0) {
         vec4 rasterized = texture2D(s_RasterizedColor, fragInput.texcoord0.xy);
