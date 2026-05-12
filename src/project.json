@@ -2,7 +2,8 @@
   "base_profile": {
     "merge_source": ["vanilla"],
     "include_patterns": [
-      "materials/ColorPostProcessing"
+      "materials/ColorPostProcessing",
+      "materials/LegacyCubemapForwardPBR"
     ],
     "exclude_patterns": ["include/*", "vanilla/*"],
     "include_search_paths": [

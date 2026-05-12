@@ -47,14 +47,14 @@ uniform vec4 DimensionID;
 uniform vec4 LocalClientID;
 uniform vec4 MoonPhase;
 uniform vec4 RenderDistance;
-uniform vec4 TimeOfDay;
+uniform vec4 TimeOfDay; // 0.0 is Noon, 0.25 is Sunset, 0.5 is Midnight, 0.75 is Sunrise, 1.0 is back to Noon.
 uniform vec4 CameraFacingDirection;
 uniform vec4 CameraPosition;
 uniform vec4 LastCameraFacingDirection;
 uniform vec4 LastCameraPosition;
 uniform vec4 SunDirection;
 uniform vec4 CloudColor;
-uniform vec4 FogColor;
+uniform vec4 FogColor;;
 
 /*
     A tonemapping shader for the Vibrant Visual (deferred) pipeline for Minecraft Bedrock Edition.
