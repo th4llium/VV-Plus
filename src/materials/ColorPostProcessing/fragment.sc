@@ -54,7 +54,7 @@ uniform vec4 LastCameraFacingDirection;
 uniform vec4 LastCameraPosition;
 uniform vec4 SunDirection;
 uniform vec4 CloudColor;
-uniform vec4 FogColor;;
+uniform vec4 FogColor;
 
 /*
     A tonemapping shader for the Vibrant Visual (deferred) pipeline for Minecraft Bedrock Edition.
