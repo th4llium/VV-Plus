@@ -10,7 +10,7 @@ Built on what the community wants, VV Plus improves the Vibrant Visuals pipeline
 6. More sharp and accurate reflections (Haven't worked on it yet)
 7. Much more performant bloom (Haven't worked on it yet)
 8. More performant water waves with the exact same visuals (Haven't worked on it yet)
-9. More extinction functions to make things actually is physically based (Haven't worked on it yet)
+9. More extinction functions to make the extinction uses newer and more accurate functions (Haven't worked on it yet)
 10. Better end sky visuals (Haven't worked on it yet)
 11. Better end portal visuals (Haven't worked on it yet)
 12. More performance fixes on volumetric fogs while enhancing visuals (Haven't worked on it yet)
