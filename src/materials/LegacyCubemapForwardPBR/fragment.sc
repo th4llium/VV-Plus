@@ -53,6 +53,18 @@ uniform vec4 SunDirection;
 uniform vec4 CloudColor;
 uniform vec4 FogColor;
 
+/*
+    A cubemap shader for the Vibrant Visual (deferred) pipeline for Minecraft Bedrock Edition.
+    This shader is responsible for the cubemap in the sky.
+    CREDITS:
+    - The obsfucated shader source code by Veka. Source: https://github.com/veka0/mcbe-shader-codebase/tree/release/obfuscated/materials/LegacyCubemapForwardPBR
+    - The creator of the code, Mojang.
+    - Modified by, Thallium.
+
+    TODO:
+    - Improve sky tinting into cubemaps.
+*/
+
 float linearToLogDepth(float linearDepth) {
     return log((exp(4.0) - 1.0) * linearDepth + 1.0) / 4.0;
 }

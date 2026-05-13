@@ -2,12 +2,12 @@ $input v_texcoord0
 #include <bgfx_shader.sh>
 
 // ColorPostProcessing buffers
-SAMPLER2D_HIGHP_AUTOREG(s_AverageLuminance);
-SAMPLER2D_HIGHP_AUTOREG(s_ColorTexture);
-SAMPLER2D_HIGHP_AUTOREG(s_CustomExposureCompensation);
-SAMPLER2D_HIGHP_AUTOREG(s_PreExposureLuminance);
-SAMPLER2D_HIGHP_AUTOREG(s_RasterizedColor);
-SAMPLER2D_HIGHP_AUTOREG(s_RasterColor);
+SAMPLER2D_AUTOREG(s_AverageLuminance);
+SAMPLER2D_AUTOREG(s_ColorTexture);
+SAMPLER2D_AUTOREG(s_CustomExposureCompensation);
+SAMPLER2D_AUTOREG(s_PreExposureLuminance);
+SAMPLER2D_AUTOREG(s_RasterizedColor);
+SAMPLER2D_AUTOREG(s_RasterColor);
 
 // ColorPostProcessing uniforms
 uniform vec4 ColorGrading_Contrast_Highlights;
