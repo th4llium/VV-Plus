@@ -329,7 +329,7 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     vec2 edgeFade = smoothstep(vec2_splat(0.0), vec2_splat(0.025), edgeDist);
     float caMask = min(edgeFade.x, edgeFade.y);
     
-    vec2 caOffset = (unscaledUv - vec2_splat(0.5)) * 0.005 * ViewportScale.xy * caMask;
+    vec2 caOffset = (unscaledUv - vec2_splat(0.5)) * 0.0015 * ViewportScale.xy * caMask;
     
     vec2 uvR = clamp(uv - caOffset, vec2_splat(0.0), ViewportScale.xy);
     vec2 uvB = clamp(uv + caOffset, vec2_splat(0.0), ViewportScale.xy);

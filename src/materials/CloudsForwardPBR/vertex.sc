@@ -14,11 +14,9 @@ uniform vec4 SubPixelOffset;
 
 #ifndef DEPTH_ONLY_PASS
 vec4 jitterVertexPosition(vec3 worldPosition) {
-    mat4 offsetProj = u_proj;
-    vec4 col2 = offsetProj[2];
-    col2.x += SubPixelOffset.x;
-    col2.y -= SubPixelOffset.y;
-    mat4 jitteredProj = mtxFromCols(u_proj[0], u_proj[1], col2, u_proj[3]);
+    mat4 jitteredProj = u_proj;
+    jitteredProj[2][0] += SubPixelOffset.x;
+    jitteredProj[2][1] -= SubPixelOffset.y;
     return mul(jitteredProj, mul(u_view, vec4(worldPosition, 1.0)));
 }
 #endif
@@ -27,12 +25,11 @@ void main() {
 #ifdef INSTANCING__OFF
     vec3 worldPos = mul(u_model[0], vec4(a_position, 1.0)).xyz;
 #else
-    mat4 model = mtxFromCols(
-        vec4(i_data1.x, i_data2.x, i_data3.x, 0.0),
-        vec4(i_data1.y, i_data2.y, i_data3.y, 0.0),
-        vec4(i_data1.z, i_data2.z, i_data3.z, 0.0),
-        vec4(i_data1.w, i_data2.w, i_data3.w, 1.0)
-    );
+    mat4 model;
+    model[0] = vec4(i_data1.x, i_data2.x, i_data3.x, 0.0);
+    model[1] = vec4(i_data1.y, i_data2.y, i_data3.y, 0.0);
+    model[2] = vec4(i_data1.z, i_data2.z, i_data3.z, 0.0);
+    model[3] = vec4(i_data1.w, i_data2.w, i_data3.w, 1.0);
     vec3 worldPos = mul(model, vec4(a_position, 1.0)).xyz;
 #endif
 
@@ -47,7 +44,7 @@ void main() {
     v_worldPos = worldPos;
     gl_Position = clipPos;
 #else
-    int cloudData = a_texcoord4;
+    int cloudData = int(a_texcoord4);
     vec2 tilePos = vec2_splat(0.0);
     vec3 cloudColor = clamp(CloudColor.xyz * a_color0.xyz, vec3_splat(0.0), vec3_splat(1.0));
     vec3 normal;

@@ -67,20 +67,25 @@ uniform vec4 CloudColor;
     - The creator of the code, Mojang.
     - Modified by, Thallium.
 
-    TODO:
-    - Round edges.
-    - Better coloring based on celestial objects and sky color.
+    FEATURES:
+    - Rounded cloud edges via SDF alpha masking.
+    - Atmospheric cloud tinting based on sun position and sky color.
 */
 
 #define INV_FOUR_PI   0.079577468335628509521484375
 #define INV_PI        0.3183098733425140380859375
 #define CLOUD_MAX_RAY 16.0
-#define CLOUD_TOP     196.3300018310546875
+#define CLOUD_TOP     200.3300018310546875
 #define CLOUD_BOTTOM  192.3300018310546875
 #define LUMINANCE_R   0.2125999927520751953125
 #define LUMINANCE_G   0.715200006961822509765625
 #define LUMINANCE_B   0.072200000286102294921875
 #define FOG_NEAR      0.89999997615814208984375
+#define CLOUD_BLOCK   16.0
+#define CLOUD_HEIGHT  (CLOUD_TOP - CLOUD_BOTTOM)
+#define EDGE_RADIUS   5.5
+#define EDGE_SMOOTH   1.8
+#define EDGE_Y_PAD    2.0
 
 vec3 worldSpaceViewDir(vec3 worldPosition) {
     vec3 cameraPosition = mul(u_invView, vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -117,8 +122,8 @@ vec3 calculateSkyColor(vec3 viewDir) {
     float sunVdL  = dot(viewDir, SunDir.xyz);
     float moonVdL = dot(viewDir, MoonDir.xyz);
 
-    float horizon    = getHorizonBlend(horizonBlendMin - horizonBlendMax, horizonBlendStart, viewDir.y);
-    float mieHorizon = getHorizonBlend(mieStartHorizon, endHorizon, viewDir.y);
+    float horizon    = getHorizonBlend(endHorizon, horizonBlendStart, viewDir.y);
+    float mieHorizon = getHorizonBlend(endHorizon, mieStartHorizon, viewDir.y);
 
     float mieSunVdL  = clamp(pow(max(sunVdL, 0.0),  AtmosphericScattering.w), 0.0, 1.0);
     float mieMoonVdL = clamp(pow(max(moonVdL, 0.0), AtmosphericScattering.w), 0.0, 1.0);
@@ -365,6 +370,63 @@ bool passesSkyProbeTest(vec3 volumeUVW) {
     vec2 skyData = texture3DLod(s_SkyAmbientSamples, uvw, 0.0).xy;
     return skyData.y >= SkySamplesConfig.w;
 }
+
+float sdRoundedRect(vec2 p, vec2 halfSize, float radius) {
+    vec2 d = abs(p) - halfSize + vec2_splat(radius);
+    return length(max(d, vec2_splat(0.0))) - radius;
+}
+
+float computeEdgeRounding(vec2 tilePos, vec3 worldPos, vec3 normal, float worldOriginY, int adjacentFlags) {
+    float localY = worldPos.y - worldOriginY - CLOUD_BOTTOM;
+    float hb = CLOUD_BLOCK * 0.5;
+    float hh = CLOUD_HEIGHT * 0.5;
+
+    vec2 facePos;
+    vec2 faceHalf;
+    bool adjNegU = false, adjPosU = false;
+    bool adjNegV = false, adjPosV = false;
+
+    if (abs(normal.y) > 0.5) {
+        facePos  = tilePos - vec2_splat(hb);
+        faceHalf = vec2_splat(hb);
+        adjNegU = (adjacentFlags & 8)  != 0;
+        adjPosU = (adjacentFlags & 16) != 0;
+        adjNegV = (adjacentFlags & 2)  != 0;
+        adjPosV = (adjacentFlags & 64) != 0;
+    } else if (abs(normal.x) > 0.5) {
+        facePos  = vec2(tilePos.y - hb, localY - hh);
+        faceHalf = vec2(hb, hh + EDGE_Y_PAD);
+        adjNegU = (adjacentFlags & 2)  != 0;
+        adjPosU = (adjacentFlags & 64) != 0;
+    } else {
+        facePos  = vec2(tilePos.x - hb, localY - hh);
+        faceHalf = vec2(hb, hh + EDGE_Y_PAD);
+        adjNegU = (adjacentFlags & 8)  != 0;
+        adjPosU = (adjacentFlags & 16) != 0;
+    }
+
+    if (adjNegU && facePos.x < 0.0) facePos.x = 0.0;
+    if (adjPosU && facePos.x > 0.0) facePos.x = 0.0;
+    if (adjNegV && facePos.y < 0.0) facePos.y = 0.0;
+    if (adjPosV && facePos.y > 0.0) facePos.y = 0.0;
+
+    float dist = sdRoundedRect(facePos, faceHalf, EDGE_RADIUS);
+    return 1.0 - smoothstep(-EDGE_SMOOTH, EDGE_SMOOTH * 0.5, dist);
+}
+
+vec3 computeCloudTint(vec3 baseAlbedo) {
+    float t = TimeOfDay.x;
+
+    float toSunset  = min(abs(t - 0.25), abs(t - 1.25));
+    float toSunrise = min(abs(t - 0.75), abs(t + 0.25));
+    float goldenHour = 1.0 - smoothstep(0.0, 0.1, min(toSunset, toSunrise));
+
+    vec3 sunChroma = SunColor.xyz / (length(SunColor.xyz) + 0.001);
+    vec3 tint = mix(vec3_splat(1.0), sunChroma, vec3_splat(goldenHour * 0.4));
+    tint *= mix(vec3_splat(1.0), SkyHorizonColor.xyz, vec3_splat(goldenHour * 0.2));
+
+    return baseAlbedo * tint;
+}
 #endif
 
 void main() {
@@ -374,8 +436,12 @@ void main() {
     vec4 cloudColor = v_color0;
     float fogIntensity = clamp(max((length(v_worldPos) / DistanceControl.x) - FOG_NEAR, 0.0), 0.0, 1.0);
 
+    float edgeAlpha = computeEdgeRounding(v_tilePosition, v_worldPos, v_normal, WorldOrigin.y, v_adjacentClouds);
+
+    vec3 tintedAlbedo = computeCloudTint(v_color0.xyz);
+
     vec3 skyAmbient = SkyAmbientLightColorIntensity.xyz * SkyAmbientLightColorIntensity.w;
-    vec3 shadedColor = (v_color0.xyz * skyAmbient) * DiffuseSpecularEmissiveAmbientTermToggles.w;
+    vec3 shadedColor = (tintedAlbedo * skyAmbient) * DiffuseSpecularEmissiveAmbientTermToggles.w;
 
     vec3 viewPos = mul(u_view, vec4(v_worldPos, 1.0)).xyz;
     vec4 clipPos = mul(u_proj, vec4(viewPos, 1.0));
@@ -396,6 +462,13 @@ void main() {
         vec3 lightIntensity = (DirectionalLightSourceDiffuseColorAndIlluminance.xyz
             * DirectionalLightSourceDiffuseColorAndIlluminance.w)
             * DirectionalLightToggleAndMaxDistanceAndMaxCascadesPerLight.x;
+
+        float t = TimeOfDay.x;
+        float toSunset  = min(abs(t - 0.25), abs(t - 1.25));
+        float toSunrise = min(abs(t - 0.75), abs(t + 0.25));
+        float goldenHour = 1.0 - smoothstep(0.0, 0.1, min(toSunset, toSunrise));
+
+        lightIntensity *= (1.0 + goldenHour * 5.0);
 
         vec3 scatteredColor;
         if (CloudLightingToggles.y != 0.0) {
@@ -420,7 +493,7 @@ void main() {
         vec3 diffuseColor;
         if (CloudLightingToggles.x != 0.0) {
             diffuseColor = scatteredColor + computeWrappedDiffuse(
-                viewNormal, lightDirView, v_color0.xyz,
+                viewNormal, lightDirView, tintedAlbedo,
                 lightIntensity, viewRayDist
             );
         } else {
@@ -471,7 +544,7 @@ void main() {
         finalAlpha = 0.0;
     } else {
         finalColor = outColor;
-        finalAlpha = cloudColor.w;
+        finalAlpha = cloudColor.w * edgeAlpha;
     }
 
 #ifdef FORWARD_PBR_TRANSPARENT_SKY_PROBE_PASS
