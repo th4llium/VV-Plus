@@ -14,12 +14,9 @@ uniform vec4 SubPixelOffset;
 
 #ifndef DEPTH_ONLY_PASS
 vec4 jitterVertexPosition(vec3 worldPosition) {
-    mat4 jitteredProj = mtxFromCols(
-        u_proj[0],
-        u_proj[1],
-        u_proj[2] + vec4(SubPixelOffset.x, -SubPixelOffset.y, 0.0, 0.0),
-        u_proj[3]
-    );
+    mat4 jitteredProj = u_proj;
+    jitteredProj[2][0] += SubPixelOffset.x;
+    jitteredProj[2][1] -= SubPixelOffset.y;
     return mul(jitteredProj, mul(u_view, vec4(worldPosition, 1.0)));
 }
 #endif
@@ -28,12 +25,11 @@ void main() {
 #ifdef INSTANCING__OFF
     vec3 worldPos = mul(u_model[0], vec4(a_position, 1.0)).xyz;
 #else
-    mat4 model = mtxFromCols(
-        vec4(i_data1.x, i_data2.x, i_data3.x, 0.0),
-        vec4(i_data1.y, i_data2.y, i_data3.y, 0.0),
-        vec4(i_data1.z, i_data2.z, i_data3.z, 0.0),
-        vec4(i_data1.w, i_data2.w, i_data3.w, 1.0)
-    );
+    mat4 model;
+    model[0] = vec4(i_data1.x, i_data2.x, i_data3.x, 0.0);
+    model[1] = vec4(i_data1.y, i_data2.y, i_data3.y, 0.0);
+    model[2] = vec4(i_data1.z, i_data2.z, i_data3.z, 0.0);
+    model[3] = vec4(i_data1.w, i_data2.w, i_data3.w, 1.0);
     vec3 worldPos = mul(model, vec4(a_position, 1.0)).xyz;
 #endif
 

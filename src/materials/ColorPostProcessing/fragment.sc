@@ -352,8 +352,8 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     
 #if ENABLE_CHROMATIC_ABERRATION
     vec2 edgeDist = min(unscaledUv, vec2_splat(1.0) - unscaledUv);
-    vec2 edgeFade = smoothstep(vec2_splat(0.0), vec2_splat(0.025), edgeDist);
-    float caMask = min(edgeFade.x, edgeFade.y);
+    vec2 edgeFade = smoothstep(vec2_splat(0.0), vec2_splat(0.1), edgeDist);
+    float caMask = edgeFade.x * edgeFade.y;
     
     vec2 caOffset = (unscaledUv - CHROMATIC_ABERRATION_CENTER) * CHROMATIC_ABERRATION_INTENSITY * ViewportScale.xy * caMask;
     

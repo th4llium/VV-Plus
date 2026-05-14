@@ -18,7 +18,6 @@ uniform vec4 DiffuseSpecularEmissiveAmbientTermToggles;
 uniform vec4 DirectionalLightSourceDiffuseColorAndIlluminance;
 uniform vec4 DirectionalLightToggleAndMaxDistanceAndMaxCascadesPerLight;
 uniform vec4 FogSkyBlend;
-uniform vec4 Time;
 uniform vec4 MoonColor;
 uniform vec4 MoonDir;
 uniform vec4 PreExposureEnabled;
@@ -47,6 +46,7 @@ uniform vec4 MoonPhase;
 uniform vec4 RenderDistance;
 uniform vec4 TimeOfDay; // 0.0 is Noon, 0.25 is Sunset, 0.5 is Midnight, 0.75 is Sunrise, 1.0 is back to Noon.
 uniform vec4 CameraFacingDirection;
+uniform vec4 ElapsedFrameTime;
 uniform vec4 CameraPosition;
 uniform vec4 LastCameraFacingDirection;
 uniform vec4 LastCameraPosition;
@@ -92,10 +92,12 @@ vec3 color_degamma(vec3 clr) {
     }
 }
 
-mat2 auroraRotation(float angle) {
-    float c = cos(angle);
-    float s = sin(angle);
-    return mtxFromCols(vec2(c, s), vec2(-s, c));
+vec2 auroraRotate(vec2 v, float c, float s) {
+    return vec2(v.x * c - v.y * s, v.x * s + v.y * c);
+}
+
+vec2 auroraNoiseRotate(vec2 v) {
+    return vec2(v.x * 0.95534 - v.y * 0.29552, v.x * 0.29552 + v.y * 0.95534);
 }
 
 float auroraTriWave(float x) {
@@ -111,19 +113,20 @@ float auroraIGNoise(vec2 screenPos) {
     return fract(magic.z * fract(dot(screenPos, magic.xy)));
 }
 
-float auroraNoise(vec2 position, mat2 timeRot) {
-    mat2 noiseRot = mtxFromCols(vec2(0.95534, 0.29552), vec2(-0.29552, 0.95534));
-
+float auroraNoise(vec2 position, float timeC, float timeS) {
     float amplitude = 1.8;
     float shiftScale = 2.5;
     float noiseSum = 0.0;
 
-    position = mul(position, auroraRotation(position.x * 0.06));
+    float posRotAngle = position.x * 0.06;
+    float prc = cos(posRotAngle);
+    float prs = sin(posRotAngle);
+    position = auroraRotate(position, prc, prs);
     vec2 basePosition = position;
 
     for (float i = 0.0; i < 3.0; i += 1.0) {
         vec2 domainShift = auroraTriWave2D(basePosition * 1.85) * 0.75;
-        domainShift = mul(domainShift, timeRot);
+        domainShift = auroraRotate(domainShift, timeC, timeS);
         position -= domainShift / vec2_splat(shiftScale);
 
         basePosition *= 1.3;
@@ -133,46 +136,36 @@ float auroraNoise(vec2 position, mat2 timeRot) {
         position *= 1.21 + (noiseSum - 1.0) * 0.02;
 
         noiseSum += auroraTriWave(position.x + auroraTriWave(position.y)) * amplitude;
-        position = mul(position, -noiseRot);
+        position = -auroraNoiseRotate(position);
     }
 
     return clamp(1.0 / pow(noiseSum * 29.0, 1.3), 0.0, 0.55);
 }
 
-float auroraLayerDist(vec3 ro, vec3 rd, float stepIdx) {
-    float heightCurve = 0.8 + pow(stepIdx, 1.4) * 0.002;
-    float perspDenom = rd.y * 2.0 + 0.4;
-    return (heightCurve - ro.y) / perspDenom;
-}
-
-vec3 auroraBaseColor(float stepIdx, float noiseVal) {
+vec3 auroraBaseColor(float layerIdx, float noiseVal) {
     vec3 colorPhase = vec3_splat(1.0) - vec3(2.15, -0.5, 1.2);
-    return (sin(colorPhase + vec3_splat(stepIdx * 0.043)) * 0.5 + 0.5) * noiseVal;
+    return (sin(colorPhase + vec3_splat(layerIdx * 0.043)) * 0.5 + 0.5) * noiseVal;
 }
 
-vec4 renderAurora(vec3 ro, vec3 rd, vec2 screenXY) {
+vec4 renderAurora(vec3 skyDir, vec2 screenXY) {
     vec4 accum = vec4_splat(0.0);
     vec4 blurred = vec4_splat(0.0);
 
-    float auroraSpeed = 0.28;
-    float auroraScale = 1.5;
-
     float dither = auroraIGNoise(screenXY);
-    mat2 timeRot = auroraRotation(Time.x * auroraSpeed);
+    float timeC = cos(ElapsedFrameTime.x * 0.28);
+    float timeS = sin(ElapsedFrameTime.x * 0.28);
 
-    float maxSteps = 20.0;
     float stride = 2.5;
 
     for (float i = 0.0; i < 20.0; i += 1.0) {
         float jStep = (i + dither) * stride;
 
-        float rDist = auroraLayerDist(ro, rd, jStep);
-        vec3 wPos = ro + vec3_splat(rDist) * rd;
-        vec2 sPos = wPos.zx;
+        float layerHeight = 0.8 + pow(jStep, 1.4) * 0.002;
+        vec2 sPos = skyDir.xz * (layerHeight / (skyDir.y * 2.0 + 0.4));
 
-        sPos += vec2(sin(wPos.z * 0.6), cos(wPos.x * 0.4)) * 0.8;
+        sPos += vec2(sin(sPos.y * 0.6), cos(sPos.x * 0.4)) * 0.8;
 
-        float nVal = auroraNoise(sPos * auroraScale, timeRot);
+        float nVal = auroraNoise(sPos * 1.5, timeC, timeS);
         vec4 stepColor = vec4(auroraBaseColor(jStep, nVal), nVal);
 
         blurred = mix(blurred, stepColor, vec4_splat(0.6));
@@ -183,7 +176,7 @@ vec4 renderAurora(vec3 ro, vec3 rd, vec2 screenXY) {
         accum += blurred * atten * fadeBot;
     }
 
-    accum *= clamp(rd.y * 15.0 + 0.4, 0.0, 1.0);
+    accum *= clamp(skyDir.y * 15.0 + 0.4, 0.0, 1.0);
     return accum * 1.8;
 }
 
@@ -275,22 +268,20 @@ void main() {
         finalColor = volumeScatteringColor;
         finalAlpha = sampledColor.a;
 
-        vec3 rayDir = normalize(v_worldPos);
-        if (rayDir.y > 0.0) {
-            vec3 rayOrigin = vec3(0.0, 0.0, -6.7);
+        vec3 skyDir = normalize(v_worldPos);
+        if (skyDir.y > 0.0) {
             vec2 screenXY = (v_clipPosition.xy / vec2_splat(v_clipPosition.w)) * 0.5 + vec2_splat(0.5);
             screenXY *= vec2(1280.0, 720.0);
 
-            vec4 auroraColor = smoothstep(vec4_splat(0.0), vec4_splat(1.5), renderAurora(rayOrigin, rayDir, screenXY));
+            vec4 auroraColor = smoothstep(vec4_splat(0.0), vec4_splat(1.5), renderAurora(skyDir, screenXY));
 
             float nightFade = smoothstep(0.3, 0.35, TimeOfDay.x) - smoothstep(0.65, 0.7, TimeOfDay.x);
             auroraColor *= nightFade;
 
-            float horizonFade = smoothstep(0.0, 0.01, abs(rayDir.y)) * 0.1 + 0.9;
+            float horizonFade = smoothstep(0.0, 0.01, abs(skyDir.y)) * 0.1 + 0.9;
             auroraColor *= horizonFade;
 
-            finalColor = mix(finalColor * (1.0 - auroraColor.a) + auroraColor.rgb, finalColor, sampledColor.a);
-            finalAlpha = max(finalAlpha, auroraColor.a);
+            finalColor = finalColor * (1.0 - auroraColor.a) + auroraColor.rgb;
         }
     }
 
