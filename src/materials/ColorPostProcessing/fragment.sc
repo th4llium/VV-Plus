@@ -63,7 +63,7 @@ uniform vec4 FogColor;
     - The obsfucated shader source code by Veka. Source: https://github.com/veka0/mcbe-shader-codebase/tree/release/obfuscated/materials/ColorPostProcessing
     - "Fork AgX Minima troy_s 342" by troy_s. Source: https://www.shadertoy.com/view/mdcSDH
     - "Tonemap operators" by romainguy. Source: https://www.shadertoy.com/view/llXyWr
-    - Krzysztof Narkowicz 2016, "ACES Filmic Tone Mapping Curve". Source: https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+    - "ACES Fitted" by Stephen Hill. Source: https://github.com/TheRealMJP/BakingLab/blob/master/BakingLab/ACES.hlsl
     - "Khronos PBR Neutral", by Khronos Group. Source: https://github.com/KhronosGroup/ToneMapping/blob/main/PBR_Neutral/pbrNeutral.glsl
     - The creator of the code, Mojang.
     - Modified and de-obsfucated by, Thallium.
@@ -237,10 +237,26 @@ vec3 TonemapACES(vec3 rgb) {
     float ExposureBias = 1.2;
     vec3 x = rgb * ExposureBias;
     
-    vec3 num = x * (2.51 * x + vec3_splat(0.03));
-    vec3 den = x * (2.43 * x + vec3_splat(0.59)) + vec3_splat(0.14);
+    mat3 inputMat = mtxFromRows(
+        vec3(0.59719, 0.35458, 0.04823),
+        vec3(0.07600, 0.90834, 0.01566),
+        vec3(0.02840, 0.13383, 0.83777)
+    );
     
-    return clamp(num / den, vec3_splat(0.0), vec3_splat(1.0));
+    mat3 outputMat = mtxFromRows(
+        vec3(1.60475, -0.53108, -0.07367),
+        vec3(-0.10208, 1.10813, -0.00605),
+        vec3(-0.00327, -0.07276, 1.07602)
+    );
+    
+    vec3 color = mul(inputMat, x);
+    
+    vec3 a = color * (color + vec3_splat(0.0245786)) - vec3_splat(0.000090537);
+    vec3 b = color * (vec3_splat(0.983729) * color + vec3_splat(0.4329510)) + vec3_splat(0.238081);
+    color = a / b;
+    
+    color = mul(outputMat, color);
+    return clamp(color, vec3_splat(0.0), vec3_splat(1.0));
 }
 
 /*
