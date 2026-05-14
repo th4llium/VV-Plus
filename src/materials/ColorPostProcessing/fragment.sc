@@ -74,6 +74,13 @@ uniform vec4 FogColor;
     - Much more advanced and smoother color grading with better performance.
 */
 
+// COLOR POST PROCESSING SETTINGS (0 is disabled, 1 is enabled)
+#define ENABLE_CHROMATIC_ABERRATION 1
+#define CHROMATIC_ABERRATION_INTENSITY 0.0015
+#define CHROMATIC_ABERRATION_CENTER vec2(0.5, 0.5)
+#define ENABLE_FILM_GRAIN 1
+#define FILM_GRAIN_INTENSITY 0.03
+
 struct FragmentInput {
     vec4 texcoord0;
 };
@@ -327,11 +334,12 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     vec2 uv = fragInput.texcoord0.xy;
     vec2 unscaledUv = fragInput.texcoord0.zw;
     
+#if ENABLE_CHROMATIC_ABERRATION
     vec2 edgeDist = min(unscaledUv, vec2_splat(1.0) - unscaledUv);
     vec2 edgeFade = smoothstep(vec2_splat(0.0), vec2_splat(0.025), edgeDist);
     float caMask = min(edgeFade.x, edgeFade.y);
     
-    vec2 caOffset = (unscaledUv - vec2_splat(0.5)) * 0.0015 * ViewportScale.xy * caMask;
+    vec2 caOffset = (unscaledUv - CHROMATIC_ABERRATION_CENTER) * CHROMATIC_ABERRATION_INTENSITY * ViewportScale.xy * caMask;
     
     vec2 uvR = clamp(uv - caOffset, vec2_splat(0.0), ViewportScale.xy);
     vec2 uvB = clamp(uv + caOffset, vec2_splat(0.0), ViewportScale.xy);
@@ -340,6 +348,9 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     float g = texture2D(s_ColorTexture, uv).y;
     float b = texture2D(s_ColorTexture, uvB).z;
     vec3 sceneColor = vec3(r, g, b);
+#else
+    vec3 sceneColor = texture2D(s_ColorTexture, uv).xyz;
+#endif
     
     float unexposeValue = texture2D(s_PreExposureLuminance, vec2_splat(0.5)).x;
     if (TonemapParams0.z > 0.0) {
@@ -390,8 +401,10 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     finalColor = color_gamma(finalColor, e);
     finalColor = clamp(finalColor, vec3_splat(0.0), vec3_splat(1.0));
     
+#if ENABLE_FILM_GRAIN
     float noise = fract(sin(dot(fragInput.texcoord0.xy + vec2_splat(ElapsedFrameTime.x), vec2(12.9898, 78.233))) * 43758.5453);
-    finalColor = clamp(finalColor + vec3_splat((noise - 0.5) * 0.03), vec3_splat(0.0), vec3_splat(1.0));
+    finalColor = clamp(finalColor + vec3_splat((noise - 0.5) * FILM_GRAIN_INTENSITY), vec3_splat(0.0), vec3_splat(1.0));
+#endif
     
     if (RasterizedColorEnabled.x > 0.0) {
         vec4 rasterized = texture2D(s_RasterizedColor, fragInput.texcoord0.xy);
