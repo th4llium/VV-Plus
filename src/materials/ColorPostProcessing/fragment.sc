@@ -61,14 +61,17 @@ uniform vec4 FogColor;
     This shader is responsible for tonemapping the HDR scene color, applying color grading, and applying a color temperature adjustment, with some improvements to the vanilla source code.
     CREDITS:
     - The obsfucated shader source code by Veka. Source: https://github.com/veka0/mcbe-shader-codebase/tree/release/obfuscated/materials/ColorPostProcessing
-    - "Fork AgX Minima troy_s 342" made by troy_s. Source: https://www.shadertoy.com/view/mdcSDH
+    - "Fork AgX Minima troy_s 342" by troy_s. Source: https://www.shadertoy.com/view/mdcSDH
+    - "Tonemap operators" by romainguy. Source: https://www.shadertoy.com/view/llXyWr
     - Krzysztof Narkowicz 2016, "ACES Filmic Tone Mapping Curve". Source: https://knarkowicz.wordpress.com/2016/01/06/aces-filmic-tone-mapping-curve/
+    - "Khronos PBR Neutral", by Khronos Group. Source: https://github.com/KhronosGroup/ToneMapping/blob/main/PBR_Neutral/pbrNeutral.glsl
     - The creator of the code, Mojang.
-    - Modified by, Thallium.
+    - Modified and de-obsfucated by, Thallium.
 
-    TODO:
-    - Replace all Reinhards with modern tonemapping operators that have better results (Khronos PBR Neutral, GT7, and maybe Lottes?).
-    - Much better color grading, I definitely can improve them for better results.
+    FEATURES:
+    - More modern and better tonemapping.
+    - Fixed auto-exposure being inaccurate, currently is based on the center of the screen instead of the whole screen.
+    - Much more advanced and smoother color grading with better performance.
 */
 
 struct FragmentInput {
@@ -87,30 +90,11 @@ float luminanceToEV100(float lum) {
     return log2(lum) + 3.0;
 }
 
-vec3 getGradingVector(vec4 highlights, vec4 shadows, vec4 midtones, float averageLuminance, float colorLuminance, vec3 defaultVal) {
-    float highlightTest = highlights.w;
-    float shadowTest = shadows.w;
-    
-    bool isHighlight = (highlightTest != 0.0) ? (colorLuminance >= (averageLuminance * ColorGrading_Misc.y)) : false;
-    bool isShadow = (shadowTest != 0.0) ? (colorLuminance <= (averageLuminance * ColorGrading_Misc.z)) : false;
-    
-    if (isHighlight) {
-        return highlights.xyz;
-    } else if (isShadow) {
-        return shadows.xyz;
-    } else {
-        if (midtones.w != 0.0) {
-            if ((colorLuminance < averageLuminance) && (shadowTest != 0.0)) {
-                return mix(shadows.xyz, midtones.xyz, vec3_splat((colorLuminance - (averageLuminance * ColorGrading_Misc.z)) / (averageLuminance - (averageLuminance * ColorGrading_Misc.z))));
-            } else if ((colorLuminance > averageLuminance) && (highlightTest != 0.0)) {
-                return mix(midtones.xyz, highlights.xyz, vec3_splat((colorLuminance - averageLuminance) / ((averageLuminance * ColorGrading_Misc.y) - averageLuminance)));
-            } else {
-                return midtones.xyz;
-            }
-        } else {
-            return defaultVal;
-        }
-    }
+vec3 getGradingVector(vec4 highlights, vec4 shadows, vec4 midtones, float shadowWeight, float highlightWeight, vec3 defaultVal) {
+    vec3 val = mix(defaultVal, midtones.xyz, step(0.001, midtones.w));
+    val = mix(val, shadows.xyz, shadowWeight * step(0.001, shadows.w));
+    val = mix(val, highlights.xyz, highlightWeight * step(0.001, highlights.w));
+    return val;
 }
 
 vec3 UnExposeLighting(vec3 color, float preExposureLuminance) {
@@ -162,7 +146,7 @@ vec3 ApplyTemperature(vec3 inColor) {
 }
 
 vec3 ApplyContrast(vec3 inColor, vec3 contrast, float contrastPivot) {
-    vec3 pivotVec = vec3_splat(contrastPivot);
+    vec3 pivotVec = vec3_splat(max(contrastPivot, 1e-5)); // Safeguard against division by zero
     vec3 colorClamp = max(inColor, vec3_splat(0.0));
     vec3 outColor = (pivotVec * pow(colorClamp / pivotVec, contrast));
     return max(outColor, vec3_splat(0.0));
@@ -184,35 +168,55 @@ vec3 ApplyOffset(vec3 inColor, vec3 offset) {
 vec3 ApplyColorGrading(vec3 inColor, float averageLuminance) {
     vec3 outColor = inColor;
     float finalLuminance = luminance(inColor);
-    outColor = ApplyContrast(outColor, getGradingVector(ColorGrading_Contrast_Highlights, ColorGrading_Contrast_Shadows, ColorGrading_Contrast_Midtones, averageLuminance, finalLuminance, vec3_splat(1.0)), ColorGrading_Misc.x * averageLuminance);
-    outColor = ApplySaturation(outColor, getGradingVector(ColorGrading_Saturation_Highlights, ColorGrading_Saturation_Shadows, ColorGrading_Saturation_Midtones, averageLuminance, finalLuminance, vec3_splat(1.0)));
-    outColor = ApplyGain(outColor, getGradingVector(ColorGrading_Gain_Highlights, ColorGrading_Gain_Shadows, ColorGrading_Gain_Midtones, averageLuminance, finalLuminance, vec3_splat(1.0)));
-    outColor = ApplyOffset(outColor, vec3_splat(averageLuminance) * getGradingVector(ColorGrading_Offset_Highlights, ColorGrading_Offset_Shadows, ColorGrading_Offset_Midtones, averageLuminance, finalLuminance, vec3_splat(0.0)));
+
+    float shadowMax = averageLuminance * ColorGrading_Misc.z;
+    float highlightMin = averageLuminance * ColorGrading_Misc.y;
+    float shadowWeight = 1.0 - smoothstep(shadowMax, averageLuminance, finalLuminance);
+    float highlightWeight = smoothstep(averageLuminance, highlightMin, finalLuminance);
+
+    outColor = ApplyContrast(outColor, getGradingVector(ColorGrading_Contrast_Highlights, ColorGrading_Contrast_Shadows, ColorGrading_Contrast_Midtones, shadowWeight, highlightWeight, vec3_splat(1.0)), ColorGrading_Misc.x * averageLuminance);
+    outColor = ApplySaturation(outColor, getGradingVector(ColorGrading_Saturation_Highlights, ColorGrading_Saturation_Shadows, ColorGrading_Saturation_Midtones, shadowWeight, highlightWeight, vec3_splat(1.0)));
+    outColor = ApplyGain(outColor, getGradingVector(ColorGrading_Gain_Highlights, ColorGrading_Gain_Shadows, ColorGrading_Gain_Midtones, shadowWeight, highlightWeight, vec3_splat(1.0)));
+    outColor = ApplyOffset(outColor, vec3_splat(averageLuminance) * getGradingVector(ColorGrading_Offset_Highlights, ColorGrading_Offset_Shadows, ColorGrading_Offset_Midtones, shadowWeight, highlightWeight, vec3_splat(0.0)));
     return outColor;
 }
 
-vec3 TonemapReinhard(vec3 rgb) {
-    return rgb / (vec3_splat(1.0) + rgb);
+vec3 TonemapUchimura(vec3 x) {
+    // Uchimura 2017, precomputed constants
+    const float m = 0.22;
+    const float S0 = 0.532;
+    const float CP = -2.13675213675;
+
+    vec3 w0 = vec3_splat(1.0) - smoothstep(vec3_splat(0.0), vec3_splat(m), x);
+    vec3 w2 = step(vec3_splat(S0), x);
+    vec3 w1 = vec3_splat(1.0) - w0 - w2;
+
+    vec3 T = vec3_splat(m) * pow(x * vec3_splat(4.54545454), vec3_splat(1.33));
+    vec3 S = vec3_splat(1.0) - vec3_splat(0.468) * exp(vec3_splat(CP) * (x - vec3_splat(S0)));
+
+    return T * w0 + x * w1 + S * w2;
 }
 
-vec3 TonemapReinhardLuma(vec3 rgb, float W) {
-    return (rgb * (vec3_splat(1.0) + (rgb / vec3_splat(W)))) / (vec3_splat(1.0) + rgb);
+vec3 TonemapLottes(vec3 x) {
+    // Lottes 2016, precomputed constants
+    return pow(x, vec3_splat(1.6)) / (pow(x, vec3_splat(1.5632)) * 1.07304 + vec3_splat(0.16742));
 }
 
-vec3 TonemapReinhardLuminance(vec3 rgb, float W) {
-    float l_old = luminance(rgb);
-    float l_new = (l_old * (1.0 + (l_old / W))) / (1.0 + l_old);
-    return rgb * (l_new / l_old);
+vec3 PBRNeutralToneMapping(vec3 color) {
+    float x = min(color.x, min(color.y, color.z));
+    color -= mix(x - 6.25 * x * x, 0.04, step(0.08, x));
+
+    float peak = max(color.x, max(color.y, color.z));
+    float newPeak = mix(peak, 1.0 - 0.0576 / (peak - 0.52), step(0.76, peak));
+    
+    color *= newPeak / max(peak, 1e-5);
+    float g = 1.0 - 1.0 / (0.15 * (peak - newPeak) + 1.0);
+    
+    return mix(color, vec3_splat(newPeak), vec3_splat(g));
 }
 
 vec3 HableTonemap(vec3 x) {
-    float A = 0.15;
-    float B = 0.50;
-    float C = 0.10;
-    float D = 0.20;
-    float E = 0.02;
-    float F = 0.30;
-    return ((x * (A * x + vec3_splat(C * B)) + vec3_splat(D * E)) / (x * (A * x + vec3_splat(B)) + vec3_splat(D * F))) - vec3_splat(E / F);
+    return ((x * (0.15 * x + vec3_splat(0.05)) + vec3_splat(0.004)) / (x * (0.15 * x + vec3_splat(0.50)) + vec3_splat(0.06))) - vec3_splat(0.0666666);
 }
 
 vec3 TonemapHable(vec3 rgb, float W) {
@@ -293,9 +297,9 @@ vec3 ApplyTonemap(vec3 sceneColor, float averageLuminance, float compensation, f
     float whitePointSquared = scaledWhitePoint * scaledWhitePoint;
 
     if (tonemapperType >= 1.0 && tonemapperType < 2.0) {
-        return TonemapReinhardLuma(exposedColor, whitePointSquared);
+        return TonemapLottes(exposedColor);
     } else if (tonemapperType >= 2.0 && tonemapperType < 3.0) {
-        return TonemapReinhardLuminance(exposedColor, whitePointSquared);
+        return PBRNeutralToneMapping(exposedColor);
     } else if (tonemapperType >= 3.0 && tonemapperType < 4.0) {
         return TonemapHable(exposedColor, whitePointSquared);
     } else if (tonemapperType >= 4.0 && tonemapperType < 5.0) {
@@ -303,7 +307,7 @@ vec3 ApplyTonemap(vec3 sceneColor, float averageLuminance, float compensation, f
     } else if (tonemapperType >= 5.0 && tonemapperType < 6.0) {
         return TonemapGeneric(exposedColor);
     } else {
-        return TonemapReinhard(exposedColor);
+        return TonemapUchimura(exposedColor);
     }
 }
 
@@ -311,13 +315,11 @@ vec3 color_gamma(vec3 clr, vec3 e) {
     if (ColorGrading_Misc2.x != 0.0) {
         return pow(max(clr, vec3_splat(0.0)), vec3_splat(1.0) / e);
     } else {
-        vec3 srgbTone = clr;
         vec3 linearTone = clr * 12.92;
         vec3 expTone = (pow(abs(clr), vec3_splat(0.4166666)) * 1.055) - vec3_splat(0.055);
-        srgbTone.x = (srgbTone.x <= 0.0031308) ? linearTone.x : expTone.x;
-        srgbTone.y = (srgbTone.y <= 0.0031308) ? linearTone.y : expTone.y;
-        srgbTone.z = (srgbTone.z <= 0.0031308) ? linearTone.z : expTone.z;
-        return pow(srgbTone, vec3_splat(2.2) / e);
+        vec3 isLinear = step(clr, vec3_splat(0.0031308));
+        vec3 srgbTone = mix(expTone, linearTone, isLinear);
+        return pow(max(srgbTone, vec3_splat(0.0)), vec3_splat(2.2) / e);
     }
 }
 
@@ -381,7 +383,9 @@ void Frag(FragmentInput fragInput, inout FragmentOutput fragOutput) {
     }
     
     float finalLuminance = luminance(finalColor);
-    vec3 e = getGradingVector(ColorGrading_Gamma_Highlights, ColorGrading_Gamma_Shadows, ColorGrading_Gamma_Midtones, 0.18, finalLuminance, vec3_splat(2.2)) * ColorGrading_Misc.w;
+    float gammaShadowWeight = 1.0 - smoothstep(0.18 * ColorGrading_Misc.z, 0.18, finalLuminance);
+    float gammaHighlightWeight = smoothstep(0.18, 0.18 * ColorGrading_Misc.y, finalLuminance);
+    vec3 e = getGradingVector(ColorGrading_Gamma_Highlights, ColorGrading_Gamma_Shadows, ColorGrading_Gamma_Midtones, gammaShadowWeight, gammaHighlightWeight, vec3_splat(2.2)) * ColorGrading_Misc.w;
     
     finalColor = color_gamma(finalColor, e);
     finalColor = clamp(finalColor, vec3_splat(0.0), vec3_splat(1.0));

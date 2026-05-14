@@ -68,14 +68,14 @@ uniform vec4 CloudColor;
     - Modified by, Thallium.
 
     FEATURES:
-    - Rounded cloud edges via SDF alpha masking.
+    - Softer cloud tints
     - Atmospheric cloud tinting based on sun position and sky color.
 */
 
 #define INV_FOUR_PI   0.079577468335628509521484375
 #define INV_PI        0.3183098733425140380859375
 #define CLOUD_MAX_RAY 16.0
-#define CLOUD_TOP     200.3300018310546875
+#define CLOUD_TOP     196.3300018310546875
 #define CLOUD_BOTTOM  192.3300018310546875
 #define LUMINANCE_R   0.2125999927520751953125
 #define LUMINANCE_G   0.715200006961822509765625
@@ -83,9 +83,6 @@ uniform vec4 CloudColor;
 #define FOG_NEAR      0.89999997615814208984375
 #define CLOUD_BLOCK   16.0
 #define CLOUD_HEIGHT  (CLOUD_TOP - CLOUD_BOTTOM)
-#define EDGE_RADIUS   5.5
-#define EDGE_SMOOTH   1.8
-#define EDGE_Y_PAD    2.0
 
 vec3 worldSpaceViewDir(vec3 worldPosition) {
     vec3 cameraPosition = mul(u_invView, vec4(0.0, 0.0, 0.0, 1.0)).xyz;
@@ -371,12 +368,7 @@ bool passesSkyProbeTest(vec3 volumeUVW) {
     return skyData.y >= SkySamplesConfig.w;
 }
 
-float sdRoundedRect(vec2 p, vec2 halfSize, float radius) {
-    vec2 d = abs(p) - halfSize + vec2_splat(radius);
-    return length(max(d, vec2_splat(0.0))) - radius;
-}
-
-float computeEdgeRounding(vec2 tilePos, vec3 worldPos, vec3 normal, float worldOriginY, int adjacentFlags) {
+vec3 computeRoundedNormal(vec2 tilePos, vec3 worldPos, vec3 normal, float worldOriginY, int adjacentFlags) {
     float localY = worldPos.y - worldOriginY - CLOUD_BOTTOM;
     float hb = CLOUD_BLOCK * 0.5;
     float hh = CLOUD_HEIGHT * 0.5;
@@ -385,6 +377,9 @@ float computeEdgeRounding(vec2 tilePos, vec3 worldPos, vec3 normal, float worldO
     vec2 faceHalf;
     bool adjNegU = false, adjPosU = false;
     bool adjNegV = false, adjPosV = false;
+    
+    vec3 tangentU = vec3_splat(0.0);
+    vec3 tangentV = vec3_splat(0.0);
 
     if (abs(normal.y) > 0.5) {
         facePos  = tilePos - vec2_splat(hb);
@@ -393,16 +388,22 @@ float computeEdgeRounding(vec2 tilePos, vec3 worldPos, vec3 normal, float worldO
         adjPosU = (adjacentFlags & 16) != 0;
         adjNegV = (adjacentFlags & 2)  != 0;
         adjPosV = (adjacentFlags & 64) != 0;
+        tangentU = vec3(1.0, 0.0, 0.0);
+        tangentV = vec3(0.0, 0.0, 1.0);
     } else if (abs(normal.x) > 0.5) {
         facePos  = vec2(tilePos.y - hb, localY - hh);
-        faceHalf = vec2(hb, hh + EDGE_Y_PAD);
+        faceHalf = vec2(hb, hh);
         adjNegU = (adjacentFlags & 2)  != 0;
         adjPosU = (adjacentFlags & 64) != 0;
+        tangentU = vec3(0.0, 0.0, 1.0);
+        tangentV = vec3(0.0, 1.0, 0.0);
     } else {
         facePos  = vec2(tilePos.x - hb, localY - hh);
-        faceHalf = vec2(hb, hh + EDGE_Y_PAD);
+        faceHalf = vec2(hb, hh);
         adjNegU = (adjacentFlags & 8)  != 0;
         adjPosU = (adjacentFlags & 16) != 0;
+        tangentU = vec3(1.0, 0.0, 0.0);
+        tangentV = vec3(0.0, 1.0, 0.0);
     }
 
     if (adjNegU && facePos.x < 0.0) facePos.x = 0.0;
@@ -410,8 +411,10 @@ float computeEdgeRounding(vec2 tilePos, vec3 worldPos, vec3 normal, float worldO
     if (adjNegV && facePos.y < 0.0) facePos.y = 0.0;
     if (adjPosV && facePos.y > 0.0) facePos.y = 0.0;
 
-    float dist = sdRoundedRect(facePos, faceHalf, EDGE_RADIUS);
-    return 1.0 - smoothstep(-EDGE_SMOOTH, EDGE_SMOOTH * 0.5, dist);
+    vec2 uv = facePos / faceHalf;
+    vec2 bendMag = sign(uv) * smoothstep(vec2_splat(0.3), vec2_splat(1.0), abs(uv));
+    
+    return normalize(normal + tangentU * bendMag.x * 0.7 + tangentV * bendMag.y * 0.7);
 }
 
 vec3 computeCloudTint(vec3 baseAlbedo) {
@@ -436,8 +439,6 @@ void main() {
     vec4 cloudColor = v_color0;
     float fogIntensity = clamp(max((length(v_worldPos) / DistanceControl.x) - FOG_NEAR, 0.0), 0.0, 1.0);
 
-    float edgeAlpha = computeEdgeRounding(v_tilePosition, v_worldPos, v_normal, WorldOrigin.y, v_adjacentClouds);
-
     vec3 tintedAlbedo = computeCloudTint(v_color0.xyz);
 
     vec3 skyAmbient = SkyAmbientLightColorIntensity.xyz * SkyAmbientLightColorIntensity.w;
@@ -450,7 +451,8 @@ void main() {
     vec3 litColor;
 
     if (CloudLightingToggles.z != 0.0) {
-        vec4 worldNormal4 = vec4(v_normal, 0.0);
+        vec3 roundedNormal = computeRoundedNormal(v_tilePosition, v_worldPos, v_normal, WorldOrigin.y, v_adjacentClouds);
+        vec4 worldNormal4 = vec4(roundedNormal, 0.0);
         vec3 viewNormal = mul(u_view, worldNormal4).xyz;
         vec3 viewDir = normalize(v_worldPos);
 
@@ -544,7 +546,7 @@ void main() {
         finalAlpha = 0.0;
     } else {
         finalColor = outColor;
-        finalAlpha = cloudColor.w * edgeAlpha;
+        finalAlpha = cloudColor.w;
     }
 
 #ifdef FORWARD_PBR_TRANSPARENT_SKY_PROBE_PASS

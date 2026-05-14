@@ -99,7 +99,7 @@ void main() {
     
     vec3 skyTint = mix(SkyHorizonColor.xyz, SkyZenithColor.xyz, clamp(normalize(v_worldPos).y + 0.2, 0.0, 1.0));
     
-    vec3 totalTint = baseLighting * mix(vec3_splat(1.0), max(skyTint, vec3_splat(0.2)), 0.6);
+    vec3 totalTint = baseLighting;
     vec3 lightCorrectedColor = degammaColor * totalTint;
 
     vec3 atmosphericScatteringColor;
@@ -131,8 +131,6 @@ void main() {
             vec3 moonMieScatter = MoonColor.xyz * MoonColor.w * AtmosphericScattering.z * moonScatter * (0.0361 / (moonMie * sqrt(moonMie)));
             
             vec3 scatterColor = baseScatter * (sunPhase + moonPhase) + horizonScatter * (sunMieScatter + moonMieScatter);
-            // Instead of fading out the cubemap into a gray sky, we add a subtle scattering effect
-            // to keep the cubemap opaque, vibrant, and fully visible
             atmosphericScatteringColor = lightCorrectedColor + scatterColor * cloudFade * 0.3;
         } else {
             atmosphericScatteringColor = lightCorrectedColor;
@@ -175,9 +173,7 @@ void main() {
     float finalAlpha = 0.0;
     if (shouldRender) {
         finalColor = volumeScatteringColor;
-        // smoothstep guarantees fully transparent (0.0) stays 0.0, half (0.5) stays ~0.5,
-        // but pushes anything >0.85 to be 100% fully opaque!
-        finalAlpha = smoothstep(0.0, 0.85, sampledColor.a);
+        finalAlpha = sampledColor.a;
     }
 
 #ifdef FORWARD_PBR_TRANSPARENT_SKY_PROBE_PASS
