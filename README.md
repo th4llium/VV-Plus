@@ -4,9 +4,9 @@ Built on what the community wants, VV Plus improves the Vibrant Visuals pipeline
 # GOAL
 1. Better auto-exposure and ACES changes (Done)
 2. More stylized features, for example: Film grain and chromatic aberration (Done)
-3. Better tonemapping choices and color grading functions (W.I.P)
+3. Better tonemapping choices and color grading functions (Done)
 4. Better cubemaps support (W.I.P)
-5. Rounded cloud edges (Haven't worked on it yet)
+5. Softer and better cloud tints (Done)
 6. More sharp and accurate reflections (Haven't worked on it yet)
 7. Much more performant bloom (Haven't worked on it yet)
 8. More performant water waves with the exact same visuals (Haven't worked on it yet)
